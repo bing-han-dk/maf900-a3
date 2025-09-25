@@ -1,6 +1,4 @@
-# maf900-a3
-
-## Fama and MacBeth (1973)
+# Fama and MacBeth (1973)
 
 ### Data 
 
@@ -58,6 +56,7 @@ Summary of ambiguities and my replication decisions
 
 ### Key Logic of estimation stage
 
+```
 if we have estart=1930, eend = 1934, tstart=1935, tend = 1938
 
 set a cursor n = 0
@@ -65,27 +64,27 @@ set a cursor n = 0
 for i in range(tstart, tend) # e.g. i = 1935,1936,1937,1938
 
   step1:
-  
+
   generate individual stock beta use data from estart to eend+n (year) and get the dataframe beta_e 
-  
+
   step2:
-  
+
   generate 20 portfolio beta for every monthy of year i
-  
+
   every monthy use portflolio group info (1~20) from beta_f and beta info from beta_e
-  
+
   if any stock is delisted in current month,exclude the stock (by merge the data_delist)
-  
+
   calculate portfolio beta by average the stock beta
-  
+
   save portfolio beta (20 rows for each month) into dataframe beta_p 
-  
+
   step3:
-  
+
     n+1
-    
+
   (to next i)
-  
+
   *Note:
     beta_f with columns - permno,beta,portfolio(1~20)
     beta_e with columns - permno,beta
@@ -99,3 +98,4 @@ for i in range(tstart, tend) # e.g. i = 1935,1936,1937,1938
       do(data.frame(beta = estimate_capm(data = ., min_obs = 60))) %>%
       ungroup()%>%
       filter(!is.na(beta))
+```
