@@ -26,7 +26,7 @@ res_ret <- dbSendQuery(wrds, "
                   select t2.*, t1.date, t1.RET as ret
                   from crsp_a_stock.msf t1 
                   inner join SHRCD t2 
-                  on t1.PERMNO = t1.PERMNO 
+                  on t1.PERMNO = t2.PERMNO 
                   and t1.date < '1968-07-01'
                   and hexcd = 1
                   and t1.retx is not null;
@@ -41,7 +41,7 @@ data_ret_bk<-data_ret
 
 # crsp delist data 
 res_delist <- dbSendQuery(wrds, "
-                  select permno,permco,dlstdt 
+                  select permno,permco,dlstdt,dlret
                   from crsp_a_stock.msedelist 
                   where dlstdt < '1968-07-01';
       ")
@@ -50,44 +50,27 @@ dbClearResult(res_delist)
 head(data_delist)
 
 
-## Fama-French factor data 
-#res_factor <- dbSendQuery(wrds, "
-#                  select dateff, mktrf, rf
-#                  from ff_all.factors_monthly 
-#                  where date between < '1968-07-01';
-#      ")
-#data_factor <- dbFetch(res_factor, n = -1)
-#dbClearResult(res_factor)
-#head(data_factor)
+# rf data 
+res_factor <- dbSendQuery(wrds, "
+                  select dateff, rf
+                  from ff_all.factors_monthly 
+                  where date < '1968-07-01';
+      ")
+data_factor <- dbFetch(res_factor, n = -1)
+dbClearResult(res_factor)
+head(data_factor)
 
 
-#data_ret <- data_ret %>%
-#  mutate(year = year(date), month = month(date)) %>%
-#  left_join(
-#    data_factor %>%
-#      mutate(year = year(dateff), month = month(dateff)) %>%
-#      select(year, month, rf, mktrf),
-#    by = c("year", "month")
-#  ) %>%
-#  # mutate(exret = ret - rf) %>%
-#  mutate(mkt = mktrf + rf) %>%
-#  filter(!is.na(rf))
+data_factor<-data_factor %>% mutate(year = year(dateff), month = month(dateff))
 
 
 data_ret <- data_ret %>%
   mutate(year = year(date), month = month(date)) %>%
-  #left_join(
-  #  data_factor %>%
-  #    mutate(year = year(dateff), month = month(dateff)) %>%
-  #    select(year, month, rf),
-  #  by = c("year", "month")
-  #) %>%
   group_by(year, month) %>%
   mutate(
     mkt = mean(ret, na.rm = TRUE)
   ) %>%
   ungroup()%>%
-  # mutate(rf = ifelse(year == 1926 & month < 7 & is.na(rf), 0.0022, rf))%>%
   filter(!is.na(ret))
 
 
@@ -187,7 +170,7 @@ assign_portfolios <- function(beta_df, n_port = 20) {
 # --- FAMA AND MACBETH (1973) 
 
 
-p <- 1
+p <- 2
 message("Processing period ", periods[[p]]$name, " ...")
 fstart <- periods[[p]]$fstart 
 fend   <- periods[[p]]$fend 
@@ -199,16 +182,17 @@ tend   <- periods[[p]]$tend
 
 #--- formation stage ---
 
+formation_data<-data_ret %>% filter(year >= fstart & year <= fend)
 
-beta_f <- data_ret %>% 
-  filter(year >= fstart & year <= fend) %>%
+message(length(unique(formation_data$permno)), " stocks in formation_data")
+
+beta_f <- formation_data %>% 
   group_by(permno) %>%
   do(estimate_beta(data = ., min_obs = 48)) %>% 
   ungroup()%>%
   filter(!is.na(beta))
 
-
-# print No. of securities available (for table 1)
+message(length(unique(beta_f$permno)), " stocks in beta_f")
 
 
 # assign portfolios
@@ -231,41 +215,49 @@ beta_p_all <- purrr::map_dfr(tstart:tend, function(i) {
   message("Processing year ", i, " ...")
   
   n <- i - tstart
-
+  
   # re-cumpute individual beta & s(e)
-  beta_e <- data_ret %>% 
-    filter(year >= estart & year <= (eend+n)) %>%
+  estimatation_data<-data_ret %>% filter(year >= estart & year <= (eend+n))
+  
+  message(length(unique(estimatation_data$permno)), " stocks in estimatation_data")
+  
+  beta_e <- estimatation_data %>% 
     group_by(permno) %>%
     do(estimate_beta(data = ., min_obs = 60)) %>%
     ungroup() %>%
     filter(!is.na(beta))
   
-  
-  # print No. of securities meeting data requirements (for table 1)
-  
+  message(length(unique(beta_e$permno)), " stocks in beta_e")
   
   # portfolio beta of year i (all months)
   beta_p_year <- purrr::map_dfr(1:12, function(m) {
     
-    # monthly first day
-    cutoff_date <- as.Date(sprintf("%d-%02d-01", i, m))
+    # merge month i's delisting return
+    data_ret_m <- data_ret %>%
+      filter(year == i, month == m) %>%
+      left_join(
+        data_delist %>% select(permno, dlstdt, dlret)
+        ,by = "permno"
+        ) %>%
+      mutate(
+        ret = ifelse(
+          !is.na(dlstdt)&year(dlstdt)==i&month(dlstdt)==m,
+          (1+ret)*(1+coalesce(dlret, 0))-1, ret))
     
-    # get all delisted stocks 
+    # make delisting set
+    first_date  <- as.Date(sprintf("%d-%02d-01", i, m))
     delist_set <- data_delist %>%
-      filter(!is.na(dlstdt), dlstdt <= cutoff_date) %>%
+      filter(!is.na(dlstdt), dlstdt < first_date) %>%
       pull(permno)
     
-    # merge beta_f, beta_e and data_ret, excluding delisted
+    # # merge beta_f, beta_e and data_ret, excluding delisted 
     df_m <- beta_f %>%
       inner_join(beta_e, by = "permno") %>%
       filter(!(permno %in% delist_set)) %>%
       inner_join(
-        data_ret %>%
-          filter(year == i, month == m) %>%
-          select(permno, ret),
+        data_ret_m %>% select(permno, ret),
         by = "permno"
       ) %>%
-      #only keep beta_e's beta and sd_resid
       select(permno, portfolio, beta = beta.y, sd_resid = sd_resid.y, ret)
     
     # calculate portfolio beta, se and return 
@@ -287,7 +279,7 @@ beta_p_all <- purrr::map_dfr(tstart:tend, function(i) {
 
 
 # portfolio level estimation (Table 2)
-beta_p_stat <- beta_f %>%
+beta_p_est <- beta_f %>%
   inner_join(
     data_ret %>%
       filter(year >= estart & year <= eend) %>%
@@ -308,7 +300,7 @@ beta_p_stat <- beta_f %>%
 
 # --- table 2 --- 
 
-stat_t2 <- beta_p_stat %>%
+stat_t2 <- beta_p_est %>%
   left_join(
     beta_p_all %>%
       filter(year == tstart, month == 1) %>% 
@@ -318,8 +310,58 @@ stat_t2 <- beta_p_stat %>%
   mutate(sd_resid_over = sd_resid / sd_resid_i)
 
 
-# --- 
+# --- two parameter regression --- 
+
+beta_p_all <- beta_p_all %>%
+  mutate(beta2 = beta^2)
+
+
+run_fmb <- function(data, formula_str) {
+  data %>%
+    group_by(year, month) %>%
+    group_modify(~ {
+      model <- lm(as.formula(formula_str), data = .x)
+      tidy_res <- broom::tidy(model)
+      tidy_res$r_squared <- summary(model)$r.squared
+      tidy_res
+    }) %>%
+    ungroup()
+}
+
+
+fmb_model1 <- run_fmb(beta_p_all, "ret ~ beta")
+fmb_model2 <- run_fmb(beta_p_all, "ret ~ beta + beta2")
+fmb_model3 <- run_fmb(beta_p_all, "ret ~ beta + sd_resid")
+fmb_model4 <- run_fmb(beta_p_all, "ret ~ beta + beta2 + sd_resid")
+
+
+fmb_coef_stats <- function(fmb_model, rf_data) {
+  fmb_model %>%
+    left_join(rf_data %>% select(year, month, rf), by = c("year", "month")) %>%
+    group_by(term) %>%
+    summarise(
+      mean_gamma = mean(estimate, na.rm = TRUE),
+      sd_gamma = sd(estimate, na.rm = TRUE),
+      t_stat = mean_gamma / (sd_gamma / sqrt(n())),
+      
+      acf1 = acf(estimate, plot = FALSE)$acf[2],  # ρ₀(γ)
+      
+      mean_gamma_rf = mean(estimate - rf, na.rm = TRUE),
+      t_gamma_rf = mean_gamma_rf / (sd_gamma / sqrt(n())),
+      acf1_gamma_rf = acf(estimate - rf, plot = FALSE)$acf[2],
+      
+      .groups = "drop"
+    )
+}
+
+#--- table 3 
+fmb_coef1 <-fmb_coef_stats(fmb_model1, data_factor)
+fmb_coef2 <-fmb_coef_stats(fmb_model2, data_factor)
+fmb_coef3 <-fmb_coef_stats(fmb_model3, data_factor)
+fmb_coef4 <-fmb_coef_stats(fmb_model4, data_factor)
 
 
 
+# print No. of securities available (for table 1)
+# print No. of securities meeting data requirements (for table 1)
 
