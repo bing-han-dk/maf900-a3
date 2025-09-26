@@ -4,23 +4,23 @@
 
 A. CRSP Data
 
-- Monthly total stock returns (including dividends and capital gains, adjusted for splits and stock dividends) (to compute individual stock beta and portfolio returns)
-- Stock identifiers and delisting dates (to determine whether a stock is available in a given portfolio formation, beta estimation, or testing period)
-- 1926.1 - 1968.6
-- New York Stock Exchange
-- All common stocks
+Monthly total stock returns (including dividends and capital gains, adjusted for splits and stock dividends) (to compute individual stock beta and portfolio returns)
 
-B. Fama–French Data
+Stock identifiers and delisting dates (to determine whether a stock is available in a given portfolio formation, beta estimation, or testing period)
 
-- Market factor (Mkt-Rf) (to use as a proxy for the market portfolio in beta estimation)
-- Risk-free rate (Rf) (to compute excess returns for beta estimation and testing)
-- Ken French Website, WRDS supported
+1926.1 - 1968.6
 
-C. Based on Gonedes (1973),
+New York Stock Exchange
 
-- A stock must be available in the first month of the testing period to be included in a portfolio.
-- The stock must have complete data for the preceding 5-year beta estimation period.
-- The stock must have at least 4 years of data in the portfolio formation period.
+All common stocks
+
+B. Based on Gonedes (1973),
+
+A stock must be available in the first month of the testing period to be included in a portfolio.
+
+The stock must have complete data for the preceding 5-year beta estimation period.
+
+The stock must have at least 4 years of data in the portfolio formation period.
 
 #### Methodology
 
@@ -40,19 +40,17 @@ Testing stage (four years except for the last):
 
 The entire process continues rolling forward according to the framework of "seven years of formation + five years of estimation + four years of testing ," resulting in a total of nine complete testing cycles.
 
+PS (in-class insight): The essential purpose of "using estimation state“ is to use the new error term distribution to hedge the problem of overvaluation (undervaluation) of the high (low) beta portfolios in formation stage.
 
 #### Ambiguity
 
 Summary of ambiguities and my replication decisions
 
-- Portfolio residuals: Paper doesn’t specify; we average stock residuals within each portfolio.
+Individual beta estimation: rolling vs. one-time; we use one-time regressions.
 
-- Individual beta estimation: Paper unclear on rolling vs. one-time; we use one-time regressions.
+Portfolio returns: Dollar weighting or share weighting? not fully defined in the paper; we take simple averages of stock returns.
 
-- Portfolio returns: Dollar weighting or share weighting? not fully defined in the paper; we take simple averages of stock returns.
-
-- Factor data: This paper use Fisher (1966) as market portfolio. But for us with using FF factors, the first formation period has no enough data. So the first period is allowed to use 42 months, while others still 48 months.
-
+For the Rp~Rm regression in estimation stage, the authors should give more information. Because it relates to the Table 2 results. e.g. We need to calculate the portfolio-level return first. During this step, data sample requirement (5 years) can avoid the delisting issues.
 
 ### Key Logic of estimation stage
 
@@ -62,27 +60,20 @@ if we have estart=1930, eend = 1934, tstart=1935, tend = 1938
 set a cursor n = 0
 
 for i in range(tstart, tend) # e.g. i = 1935,1936,1937,1938
-
+  
   step1:
-
   generate individual stock beta use data from estart to eend+n (year) and get the dataframe beta_e 
-
+  
   step2:
-
   generate 20 portfolio beta for every monthy of year i
-
   every monthy use portflolio group info (1~20) from beta_f and beta info from beta_e
-
   if any stock is delisted in current month,exclude the stock (by merge the data_delist)
-
   calculate portfolio beta by average the stock beta
-
   save portfolio beta (20 rows for each month) into dataframe beta_p 
 
   step3:
-
     n+1
-
+    
   (to next i)
 
   *Note:
